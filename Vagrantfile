@@ -12,46 +12,78 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # Every Vagrant virtual environment requires a box to build off of.
   config.vm.box = "ubuntu/trusty64"
 
-config.vm.boot_timeout = 300
+  config.vm.provision :chef_solo do |chef|
+    chef.add_recipe "apt"
+  end
 
-#config.vm.network :forwarded_port, guest: 80, host: 8888
+  config.vm.define "lb" do |lb|
+    lb.vm.network "private_network", ip: "10.66.66.100"
+    lb.vm.network "forwarded_port", guest: 22002, host: 22002
 
-config.vm.provision :chef_solo do |chef|
-	chef.add_recipe "apt"
-	chef.add_recipe "apache2"
-	chef.add_recipe "apache2::mod_php5"
-	chef.add_recipe "mysql::client"
-	chef.add_recipe "mysql::server"
-	chef.add_recipe "php"
-	chef.add_recipe "php::module_mysql"
-	chef.json = { 
-		:apache => { 
-			:default_site_enabled => true
-			#:listen_address => '0.0.0.0',
-			#:docroot_dir => '/vagrant/code',
-			#:user => 'vagrant',
-			#:group => 'vagrant'
-		},
-		:mysql => {
-			:server_root_password => '123456',
-			:server_debian_password => '123456'
-		}
-	}
-end
+    lb.vm.provision :chef_solo do |chef|
+      chef.add_recipe "haproxy"
+      chef.json = { 
+        :haproxy => { 
+          :address_bind => '10.66.66.100'
+        }
+      }
+    end
+  end
 
-config.vm.synced_folder "code/", "/var/www/html"
+=begin
+  (1..2).each do |i|
+    config.vm.define "web#{i}" do |web|
+      web.vm.provider "virtualbox" do |v|
+        v.name = "web#{i}"
+      end
 
-config.vm.define "web" do |web|
-	#web.vm.box = "apache"
-	web.vm.network "public_network", ip: "10.66.66.101"
-	#web.vm.network :forwarded_port, guest: 22, host: 2210
-end
+      web.vm.hostname = "web#{i}.dev"
 
-config.vm.define "db" do |db|
-	#db.vm.box = "mysql"
-	db.vm.network "public_network", ip: "10.66.66.102"
-	#db.vm.network :forwarded_port, guest: 22, host: 2211
-end
+      web.vm.network "private_network", ip: "10.66.66.10#{i}"
+
+      web.vm.synced_folder "code/php/", "/var/www/html"
+
+      web.vm.provision :chef_solo do |chef|
+        chef.add_recipe "apt"
+        chef.add_recipe "apache2"
+        chef.add_recipe "apache2::mod_php5"
+        chef.add_recipe "php"
+        chef.add_recipe "php::module_mysql"
+        chef.json = { 
+          :apache => { 
+            :default_site_enabled => true
+          }
+        }
+      end
+    end
+  end
+
+  config.vm.define "db" do |db|
+    db.vm.provider "virtualbox" do |v|
+      v.name = "db"
+    end
+
+    db.vm.network "private_network", ip: "10.66.66.111"
+
+    db.vm.provision :chef_solo do |chef|
+      chef.add_recipe "mysql::client"
+      chef.add_recipe "mysql::server"
+      chef.json = { 
+        :mysql => {
+          :server_root_password => '123456',
+          :server_debian_password => '123456',
+          :allow_remote_root => true
+        }
+      }
+    end
+  end
+=end
+
+  config.vm.provider "virtualbox" do |v|
+    v.memory = 4096
+    v.cpus = 4
+    #v.gui = true
+  end
 
   # Disable automatic box update checking. If you disable this, then
   # boxes will only be checked for updates when the user runs
