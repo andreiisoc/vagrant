@@ -19,18 +19,40 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   config.vm.define "lb" do |lb|
     lb.vm.network "private_network", ip: "10.66.66.100"
     lb.vm.network "forwarded_port", guest: 22002, host: 22002
+    lb.vm.network "forwarded_port", guest: 80, host: 80
 
     lb.vm.provision :chef_solo do |chef|
       chef.add_recipe "haproxy"
       chef.json = { 
         :haproxy => { 
-          :address_bind => '10.66.66.100'
+          :admin => {
+            :address_bind => '10.66.66.100'
+          },
+          :listeners => {
+            :frontend => {
+              :http => {
+                :maxconn => 2000,
+                :bind => "*:80",
+                :default_backend => :backend_servers
+              }
+            },
+            :backend => {
+              :backend_servers => {
+                :mode => :http,
+                :server => [
+                  "web1 10.66.66.101:80" => {
+                    :weight => 1,
+                    :maxconn => 100
+                  }
+                ]
+              }
+            }
+          }
         }
       }
     end
   end
 
-=begin
   (1..2).each do |i|
     config.vm.define "web#{i}" do |web|
       web.vm.provider "virtualbox" do |v|
@@ -77,7 +99,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
       }
     end
   end
-=end
 
   config.vm.provider "virtualbox" do |v|
     v.memory = 4096
