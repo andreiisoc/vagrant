@@ -12,17 +12,30 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # Every Vagrant virtual environment requires a box to build off of.
   config.vm.box = "ubuntu/trusty64"
 
+  MAX_HTTP_SERVERS = 2
+
   config.vm.provision :chef_solo do |chef|
     chef.add_recipe "apt"
   end
 
   config.vm.define "lb" do |lb|
+    lb.vm.provider "virtualbox" do |v|
+      v.name = "lb"
+    end
+
     lb.vm.network "private_network", ip: "10.66.66.100"
     lb.vm.network "forwarded_port", guest: 22002, host: 22002
     lb.vm.network "forwarded_port", guest: 80, host: 80
 
     lb.vm.provision :chef_solo do |chef|
       chef.add_recipe "haproxy"
+
+      backend_servers = []
+
+      (1..MAX_HTTP_SERVERS).each do |i|
+        backend_servers.push "server web#{i} 10.66.66.10#{i}:80 weight 1 maxconn 100 check"
+      end
+
       chef.json = { 
         :haproxy => { 
           :admin => {
@@ -30,30 +43,23 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
           },
           :listeners => {
             :frontend => {
-              :http => {
-                :maxconn => 2000,
-                :bind => "*:80",
-                :default_backend => :backend_servers
-              }
+              :http => [
+                "maxconn 2000",
+                "bind *:80",
+                "default_backend servers-http"
+              ]
             },
             :backend => {
-              :backend_servers => {
-                :mode => :http,
-                :server => [
-                  "web1 10.66.66.101:80" => {
-                    :weight => 1,
-                    :maxconn => 100
-                  }
-                ]
-              }
+              "servers-http" => backend_servers
             }
           }
         }
       }
+
     end
   end
 
-  (1..2).each do |i|
+  (1..MAX_HTTP_SERVERS).each do |i|
     config.vm.define "web#{i}" do |web|
       web.vm.provider "virtualbox" do |v|
         v.name = "web#{i}"
@@ -71,12 +77,20 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
         chef.add_recipe "apache2::mod_php5"
         chef.add_recipe "php"
         chef.add_recipe "php::module_mysql"
+        chef.add_recipe "php::module_gd"
+
         chef.json = { 
           :apache => { 
             :default_site_enabled => true
+          },
+          :php => {
+            :packages => %w{ php5-cgi php5 php5-dev php5-cli php-pear php5-xdebug }
           }
         }
+
       end
+
+      #config.vm.provision "shell", path: "phalcon.sh"
     end
   end
 
@@ -98,6 +112,43 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
         }
       }
     end
+  end
+
+  config.vm.define "test", autostart: false do |test|
+
+    test.vm.provider "virtualbox" do |v|
+      v.name = "test"
+    end
+
+    test.vm.hostname = "test.dev"
+
+    test.vm.network "private_network", ip: "10.66.66.199"
+
+    test.vm.synced_folder "code/php/", "/var/www/html"
+
+    test.vm.provision :chef_solo do |chef|
+      chef.add_recipe "apt"
+      chef.add_recipe "apache2"
+      chef.add_recipe "apache2::mod_php5"
+      chef.add_recipe "php"
+      chef.add_recipe "php::package"
+      chef.add_recipe "php::module_mysql"
+
+      chef.json = { 
+        :apache => { 
+          :default_site_enabled => true
+        },
+        :php => {
+          :packages => %w{ php5-cgi php5 php5-dev php5-cli php-pear php5-xdebug },
+          :directives => [
+            :short_open_tag => "On"
+          ]
+        }
+      }
+
+    end
+
+    test.vm.provision "shell", path: "phalcon.sh"
   end
 
   config.vm.provider "virtualbox" do |v|
